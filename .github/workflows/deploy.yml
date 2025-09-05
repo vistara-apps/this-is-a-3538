@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ main, master ]
 
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -19,7 +24,7 @@ jobs:
         node-version: '22'
         cache: 'npm'
         
-        - name: Install dependencies
+    - name: Install dependencies
       run: npm install
 
     - name: Build application
@@ -27,8 +32,19 @@ jobs:
       env:
         NODE_OPTIONS: --max-old-space-size=4096
         
+    - name: Check Vercel Configuration
+      id: check-vercel
+      run: |
+        if [ -z "${{ secrets.VERCEL_TOKEN }}" ]; then
+          echo "vercel_configured=false" >> $GITHUB_OUTPUT
+          echo "⚠️ Vercel deployment skipped - VERCEL_TOKEN not configured"
+        else
+          echo "vercel_configured=true" >> $GITHUB_OUTPUT
+          echo "✅ Vercel configuration found"
+        fi
+        
     - name: Deploy to Vercel (Production)
-      if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+      if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && steps.check-vercel.outputs.vercel_configured == 'true'
       uses: amondnet/vercel-action@v25
       with:
         vercel-token: ${{ secrets.VERCEL_TOKEN }}
@@ -37,7 +53,7 @@ jobs:
         vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
         
     - name: Deploy to Vercel (Preview)
-      if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master'
+      if: (github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master') && steps.check-vercel.outputs.vercel_configured == 'true'
       uses: amondnet/vercel-action@v25
       with:
         vercel-token: ${{ secrets.VERCEL_TOKEN }}
@@ -46,23 +62,58 @@ jobs:
         vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
         
     - name: Comment PR with deployment URL
-      if: github.event_name == 'pull_request'
+      if: github.event_name == 'pull_request' && steps.check-vercel.outputs.vercel_configured == 'true'
       uses: actions/github-script@v7
+      continue-on-error: true
       with:
         script: |
-          const { data: deployments } = await github.rest.repos.listDeployments({
-            owner: context.repo.owner,
-            repo: context.repo.repo
-          });
-          const latestDeployment = deployments[0];
-          if (latestDeployment) {
-            const deploymentUrl = `https://${latestDeployment.environment}.vercel.app`;
-            github.rest.issues.createComment({
+          try {
+            const { data: deployments } = await github.rest.repos.listDeployments({
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+            const latestDeployment = deployments[0];
+            if (latestDeployment) {
+              const deploymentUrl = `https://${latestDeployment.environment}.vercel.app`;
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `🚀 **Preview Deployment Ready!**
+                \n\n📱 **URL:** ${deploymentUrl}
+                \n\nThis preview will be automatically updated when you push new commits to this PR.`
+              });
+            }
+          } catch (error) {
+            console.log('Unable to post deployment comment due to permissions:', error.message);
+            console.log('🚀 Deployment completed successfully!');
+          }
+          
+    - name: Build Success Notification
+      if: github.event_name == 'pull_request' && steps.check-vercel.outputs.vercel_configured == 'false'
+      uses: actions/github-script@v7
+      continue-on-error: true
+      with:
+        script: |
+          try {
+            await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `🚀 **Preview Deployment Ready!**
-              \n\n📱 **URL:** ${deploymentUrl}
-              \n\nThis preview will be automatically updated when you push new commits to this PR.`
+              body: `✅ **Build Successful!**
+              
+              The application has been built successfully. To enable automatic Vercel deployments, configure the following secrets in your repository:
+              - \`VERCEL_TOKEN\`
+              - \`VERCEL_ORG_ID\`
+              - \`VERCEL_PROJECT_ID\`
+              
+              You can also deploy manually by running:
+              \`\`\`bash
+              npm run build
+              npx vercel --prod
+              \`\`\``
             });
+          } catch (error) {
+            console.log('Unable to post comment due to permissions:', error.message);
+            console.log('✅ Build completed successfully!');
           }

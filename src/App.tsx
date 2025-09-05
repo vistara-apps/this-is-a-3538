@@ -4,6 +4,7 @@ import { Dashboard } from './components/Dashboard';
 import { CreateDelivery } from './components/CreateDelivery';
 import { CourierView } from './components/CourierView';
 import { DeliveryManagement } from './components/DeliveryManagement';
+import { ShipChainProvider } from './context/ShipChainContext';
 
 type View = 'dashboard' | 'create-delivery' | 'courier' | 'manage-deliveries';
 
@@ -27,14 +28,16 @@ function App() {
   };
 
   return (
-    <AppShell 
-      currentView={currentView} 
-      onNavigate={setCurrentView}
-      userType={userType}
-      onUserTypeChange={setUserType}
-    >
-      {renderView()}
-    </AppShell>
+    <ShipChainProvider>
+      <AppShell 
+        currentView={currentView} 
+        onNavigate={setCurrentView}
+        userType={userType}
+        onUserTypeChange={setUserType}
+      >
+        {renderView()}
+      </AppShell>
+    </ShipChainProvider>
   );
 }
 
